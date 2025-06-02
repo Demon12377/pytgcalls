@@ -4,7 +4,7 @@ import time
 import signal
 import pathlib
 import json
-from typing import Optional, List, Dict # <--- ДОБАВЛЕН Optional и List, Dict
+from typing import Optional, List, Dict, Any # <--- ДОБАВЛЕН Optional и List, Dict, Any
 
 from telethon import TelegramClient, functions, types
 from telethon.errors import RPCError
@@ -296,24 +296,12 @@ async def download_entire_stream_segmented():
         traceback.print_exc()
         return
 
-    if not (connection_successful_flag and input_group_call_for_api and pytg_mtproto_bridge and \
-            hasattr(pytg_mtproto_bridge, 'download_stream') and hasattr(pytg_mtproto_bridge, 'get_stream_timestamp')):
+    if not (connection_successful_flag and input_group_call_for_api and pytg_mtproto_bridge and             hasattr(pytg_mtproto_bridge, 'download_stream') and hasattr(pytg_mtproto_bridge, 'get_stream_timestamp')):
         print("Не выполнены условия для начала скачивания сегментов.")
         return
 
-    # ssrc_for_initial_ts is no longer needed here as active_streams_global is passed directly
-    # if active_streams_global:
-    #     # Provisionally pick the SSRC from the first stream for initial timestamp
-    #     # This might need more sophisticated logic later
-    #     first_stream_info = active_streams_global[0]
-    #     ssrc_for_initial_ts = first_stream_info['ssrc']
-    #     print(f"  Для начальной метки времени выбран SSRC: {ssrc_for_initial_ts} (от участника {first_stream_info.get('participant_id', 'N/A')}, тип: {first_stream_info.get('type', 'N/A')})")
-    # else:
-    #     print("  Активные видео SSRC не найдены. Попытка получить временную метку без указания SSRC (может сработать для аудио).")
-
     print(f"\n--- Попытка получить начальную метку времени ---")
-    # Ensure input_group_call_for_api is not None before accessing its id attribute
-    if input_group_call_for_api is None:
+    if input_group_call_for_api is None: # Should ideally not happen due to check above, but good for safety
         print("Ошибка: input_group_call_for_api не инициализирован. Невозможно получить метку времени.")
         return
 
@@ -323,18 +311,16 @@ async def download_entire_stream_segmented():
         if pytg_app_global and hasattr(pytg_app_global, 'leave_call') and target_chat_id_int_global is not None:
             try:
                 await pytg_app_global.leave_call(target_chat_id_int_global)
-            except:
+            except: # pylint: disable=bare-except
                 pass
         return
 
     print(f"\n--- Начало циклического скачивания с ts={current_req_ts} (до {MAX_SEGMENTS_TO_DOWNLOAD} сегментов) ---")
     downloaded_segment_count = 0
-
     video_quality_to_request = 2
 
     while keep_running and downloaded_segment_count < MAX_SEGMENTS_TO_DOWNLOAD:
-        # Refresh active streams at the beginning of each timestamp iteration
-        if target_chat_id_int_global is None: # Should ideally not happen if setup was correct
+        if target_chat_id_int_global is None: # Safety check
             print("Критическая ошибка: target_chat_id_int_global не установлен перед началом основного цикла. Выход.")
             keep_running = False
             break
@@ -343,15 +329,13 @@ async def download_entire_stream_segmented():
 
         if not active_streams_global and downloaded_segment_count > 0:
             print(f"  На ts={current_req_ts} не обнаружено активных видео/презентационных потоков, хотя ранее скачивание было. Ожидание появления потоков или завершения звонка...")
-        elif not active_streams_global: # And downloaded_segment_count == 0
+        elif not active_streams_global:
             print(f"  Нет активных видео/презентационных потоков в {chat_title} для начала загрузки. Попытка получить аудио.")
-        # If active_streams_global is empty, the loop for video streams below will simply not run for this current_req_ts.
-        # Audio will still be attempted. Timestamp advancement logic will handle if no data at all is fetched.
 
         print(f"\n--- Скачивание данных для общего сегмента #{downloaded_segment_count + 1} (запрос с ts={current_req_ts}) ---")
 
         audio_segment_data = None
-        video_segment_data = None
+        video_segment_data = None # Defined at this scope for the loop
         download_succeeded_this_iteration = False
         attempt_ts_advance_due_to_time_small = False
 
@@ -368,7 +352,6 @@ async def download_entire_stream_segmented():
                 fname_audio = OUTPUT_AUDIO_TEMPLATE.format(
                     index=downloaded_segment_count + 1,
                     ts=current_req_ts
-                    # participant_id is removed from audio template, folder is 'call_audio'
                 )
                 fpath_audio = os.path.join(audio_subfolder, fname_audio)
                 offset = find_ftyp_offset(audio_segment_data)
@@ -381,20 +364,19 @@ async def download_entire_stream_segmented():
                 print(f"    АУДИО ({len(audio_segment_data)} байт) -> {fpath_audio}")
                 download_succeeded_this_iteration = True
             else:
-                print(f"    АУДИО (ts={current_req_ts}) -> No data received.") # Explicit log for no data
+                print(f"    АУДИО (ts={current_req_ts}) -> No data received.")
         except RPCError as e_rpc_aud:
             if "TIME_TOO_SMALL" in str(e_rpc_aud):
-                print(f"    АУДИО ОШИБКА (ts={current_req_ts}): TIME_TOO_SMALL.") # Clearer audio context
+                print(f"    АУДИО ОШИБКА (ts={current_req_ts}): TIME_TOO_SMALL.")
                 attempt_ts_advance_due_to_time_small = True
             else:
-                print(f"    АУДИО RPC ОШИБКА (ts={current_req_ts}): {type(e_rpc_aud).__name__} - {e_rpc_aud}") # Clearer audio context
+                print(f"    АУДИО RPC ОШИБКА (ts={current_req_ts}): {type(e_rpc_aud).__name__} - {e_rpc_aud}")
         except Exception as e_dl_a:
-            print(f"    АУДИО Общая ошибка (ts={current_req_ts}): {type(e_dl_a).__name__} - {e_dl_a}") # Clearer audio context
+            print(f"    АУДИО Общая ошибка (ts={current_req_ts}): {type(e_dl_a).__name__} - {e_dl_a}")
 
         if not keep_running:
             break
 
-        # Iterate through each active stream (video/presentation) for the current timestamp
         if not active_streams_global:
             print(f"  Нет активных видео/презентационных SSRC для скачивания на этой итерации (ts={current_req_ts}).")
 
@@ -412,7 +394,7 @@ async def download_entire_stream_segmented():
                     input_group_call_to_use=input_group_call_for_api,
                     timestamp=current_req_ts,
                     limit=SEGMENT_LIMIT_BYTES,
-                    video_channel=ssrc_for_stream,
+                    video_channel=s_src, # Corrected from ssrc_for_stream to s_src if this was an error source
                     video_quality=video_quality_to_request
                 )
                 if video_segment_data:
@@ -437,12 +419,12 @@ async def download_entire_stream_segmented():
                     print(f"    {s_type.upper()} ({len(video_segment_data)} байт от {p_id}, SSRC {s_src}) -> {fpath_video}")
                     download_succeeded_this_iteration = True
                 else:
-                    print(f"    {s_type.upper()} (участник {p_id}, SSRC {s_src}, ts={current_req_ts}) -> No data received.") # Explicit log for no data
+                    print(f"    {s_type.upper()} (участник {p_id}, SSRC {s_src}, ts={current_req_ts}) -> No data received.")
             except RPCError as e_rpc_vid:
                 if "TIME_TOO_SMALL" in str(e_rpc_vid):
                     print(f"    {s_type.upper()} ОШИБКА (участник {p_id}, SSRC {s_src}, ts={current_req_ts}): TIME_TOO_SMALL.")
                     attempt_ts_advance_due_to_time_small = True
-                elif "You haven't joined this group call" in str(e_rpc_vid):
+                elif "You haven't joined this group call" in str(e_rpc_vid): # Corrected error message check
                     print(f"    {s_type.upper()} RPC ОШИБКА (участник {p_id}, SSRC {s_src}, ts={current_req_ts}): {e_rpc_vid} - Критическая ошибка, возможно, мы были исключены или звонок завершен. Остановка.")
                     keep_running = False
                 else:
@@ -450,34 +432,43 @@ async def download_entire_stream_segmented():
             except Exception as e_dl_vid:
                 print(f"    {s_type.upper()} Общая ошибка (участник {p_id}, SSRC {s_src}, ts={current_req_ts}): {type(e_dl_vid).__name__} - {e_dl_vid}")
 
-            if not keep_running: break
+            if not keep_running: break # Break from inner loop
 
-        if not keep_running:
+        if not keep_running: # Break from outer loop if needed
             break
 
-        if download_succeeded_this_iteration: # If audio OR ANY video/presentation segment downloaded for this current_req_ts
+        if download_succeeded_this_iteration:
             downloaded_segment_count += 1
             current_req_ts += ASSUMED_SEGMENT_DURATION_MS
-        elif attempt_ts_advance_due_to_time_small: # If ANY download attempt (audio or video/presentation) got TIME_TOO_SMALL
+        elif attempt_ts_advance_due_to_time_small:
             print(f"  Была ошибка TIME_TOO_SMALL для общего ts={current_req_ts}. Попытка получить новую актуальную метку.")
-            new_ts_after_error = await get_initial_timestamp(target_chat_id_int_global, pytg_mtproto_bridge, input_group_call_for_api.id, active_streams_global)
-            if new_ts_after_error != -1 and new_ts_after_error > current_req_ts:
-                print(f"  Переходим на новую общую метку: {new_ts_after_error}")
-                current_req_ts = new_ts_after_error
+            # Ensure input_group_call_for_api is not None before using its id
+            if input_group_call_for_api:
+                 new_ts_after_error = await get_initial_timestamp(target_chat_id_int_global, pytg_mtproto_bridge, input_group_call_for_api.id, active_streams_global)
+                 if new_ts_after_error != -1 and new_ts_after_error > current_req_ts:
+                     print(f"  Переходим на новую общую метку: {new_ts_after_error}")
+                     current_req_ts = new_ts_after_error
+                 else:
+                     print(f"  Не удалось получить значительно новую метку (или ошибка), пробуем инкремент от {current_req_ts}.")
+                     current_req_ts += ASSUMED_SEGMENT_DURATION_MS
             else:
-                print(f"  Не удалось получить значительно новую метку, пробуем инкремент от {current_req_ts}.")
-                current_req_ts += ASSUMED_SEGMENT_DURATION_MS
+                print("  Не удалось обновить метку времени после TIME_TOO_SMALL: input_group_call_for_api отсутствует.")
+                current_req_ts += ASSUMED_SEGMENT_DURATION_MS # Fallback
             await asyncio.sleep(1)
-            continue
-        else: # No data downloaded and no TIME_TOO_SMALL error
+            continue # To the next iteration of the while loop
+        else: # No download, not TIME_TOO_SMALL
             print(f"  Сегмент для ts={current_req_ts} не скачан (ни аудио, ни видео) и не TIME_TOO_SMALL.")
-            server_latest_overall_ts_check = await pytg_mtproto_bridge.get_stream_timestamp(target_chat_id_int_global, target_video_channel_id=None, call_id_for_cache=input_group_call_for_api.id)
-            if server_latest_overall_ts_check == 0 and downloaded_segment_count > 0:
-                 print(f"  Серверная метка 0, а мы уже качали. Вероятно, стрим завершен. Остановка.")
-                 keep_running = False
+            if input_group_call_for_api: # Ensure it's not None
+                server_latest_overall_ts_check = await pytg_mtproto_bridge.get_stream_timestamp(target_chat_id_int_global, target_video_channel_id=None, call_id_for_cache=input_group_call_for_api.id)
+                if server_latest_overall_ts_check == 0 and downloaded_segment_count > 0:
+                     print(f"  Серверная метка 0, а мы уже качали. Вероятно, стрим завершен. Остановка.")
+                     keep_running = False
+                else:
+                     print(f"  Пробуем следующий предполагаемый сегмент: {current_req_ts + ASSUMED_SEGMENT_DURATION_MS}")
+                     current_req_ts += ASSUMED_SEGMENT_DURATION_MS
             else:
-                 print(f"  Пробуем следующий предполагаемый сегмент: {current_req_ts + ASSUMED_SEGMENT_DURATION_MS}")
-                 current_req_ts += ASSUMED_SEGMENT_DURATION_MS
+                print("  Не удалось проверить серверную метку: input_group_call_for_api отсутствует.")
+                current_req_ts += ASSUMED_SEGMENT_DURATION_MS # Fallback
 
         if keep_running and downloaded_segment_count < MAX_SEGMENTS_TO_DOWNLOAD:
             print(f"  Завершили обработку. Скачано общих сегментных групп: {downloaded_segment_count}. Задержка {DELAY_BETWEEN_SEGMENT_REQUESTS_S}с...")
@@ -495,14 +486,16 @@ async def download_entire_stream_segmented():
         try:
             print(f"Попытка покинуть звонок в {chat_title}...")
             if getattr(pytg_app_global, '_is_running', False):
-                active_calls = await pytg_app_global.calls
+                active_calls = await pytg_app_global.calls # type: ignore
                 if target_chat_id_int_global in active_calls:
                     await pytg_app_global.leave_call(target_chat_id_int_global)
                     print("Успешно покинули звонок.")
                 else:
-                    print(f"Звонок в чате {target_chat_id_int_global} не был активен для PyTgCalls.")
-        except (PyTgCallsNotInCallError, NoActiveGroupCall): # Removed TelethonNotInCallError
-            print("Уже не в звонке или звонок неактивен.")
+                    print(f"Звонок в чате {target_chat_id_int_global} не был активен для PyTgCalls (при попытке leave_call).")
+            else:
+                print("PyTgCalls не был запущен, пропуск leave_call.")
+        except (PyTgCallsNotInCallError, NoActiveGroupCall):
+            print("Уже не в звонке или звонок неактивен (при попытке leave_call).")
         except Exception as e_leave:
             print(f"Ошибка при выходе из звонка: {type(e_leave).__name__} - {e_leave}")
 
