@@ -13,8 +13,8 @@ from pytgcalls.types import UpdatedGroupCallParticipant
 
 app = Client(
     'py-tgcalls',
-    api_id=123456789,
-    api_hash='abcdef12345',
+    api_id=1,
+    api_hash='1',
 )
 call_py = PyTgCalls(app)
 

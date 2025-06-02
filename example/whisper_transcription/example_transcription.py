@@ -12,19 +12,23 @@ from pytgcalls.types import StreamFrames
 
 AUDIO_QUALITY = AudioQuality.HIGH
 
+# Define output templates
+OUTPUT_AUDIO_TEMPLATE = "participant_{participant_id}_audio_segment_{index:04d}_ts{ts}.mp4"
+OUTPUT_VIDEO_TEMPLATE = "participant_{participant_id}_video_segment_ch{ch_or_auto}_q{q_or_auto}_idx{index:04d}_ts{ts}.mp4"
+
 model = AIModel(AUDIO_QUALITY)
 
 app = Client(
     'py-tgcalls',
-    api_id=12345,
-    api_hash='0123456789abcdef0123456789abcdef',
+    api_id=1,
+    api_hash='1',
 )
 
 call_py = PyTgCalls(app)
-chat_id = 1234567890
+TARGET_ENTITY_FOR_STREAM = 'druzyab'
 call_py.start()
 call_py.record(
-    chat_id,
+    TARGET_ENTITY_FOR_STREAM,
     RecordStream(
         True,
         AUDIO_QUALITY,
