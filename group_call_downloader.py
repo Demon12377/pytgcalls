@@ -577,7 +577,7 @@ if __name__ == "__main__":
             print(f"[LAUNCHER] Общая ошибка выполнения: {type(e).__name__} - {e}")
             import traceback
             traceback.print_exc()
-    else:
+    else:  # This block executes if the try block completes without raising an exception.
         print("[LAUNCHER] Main task completed without exceptions.")
     finally:
         print("[LAUNCHER_FINALLY] Финальная очистка...")
@@ -626,14 +626,15 @@ if __name__ == "__main__":
                 print("[L_F] Основной цикл событий не закрыт и не работает, попытка запуска очистки на нем.")
                 current_loop_for_cleanup.run_until_complete(asyncio.wait_for(cleanup_async_resources(), timeout=10))
         except RuntimeError as e_rt_cleanup:
-             print(f"[L_F] Ошибка RuntimeError при выполнении cleanup_async_resources: {e_rt_cleanup}. Попытка запуска в новом цикле.")
-             try:
-                 asyncio.run(cleanup_async_resources())
-             except Exception as e_final_cleanup:
-                 print(f"[L_F] Ошибка при аварийной попытке очистки в новом цикле: {e_final_cleanup}")
+            print(f"[L_F] Ошибка RuntimeError при выполнении cleanup_async_resources: {e_rt_cleanup}. Попытка запуска в новом цикле.")
+            try:
+                asyncio.run(cleanup_async_resources())
+            except Exception as e_final_cleanup:
+                print(f"[L_F] Ошибка при аварийной попытке очистки в новом цикле: {e_final_cleanup}")
         except Exception as e_cleanup:
             print(f"[L_F] Общая ошибка при выполнении cleanup_async_resources: {e_cleanup}")
 
+        # Final attempt to clean up any remaining asyncio tasks from the original loop if it's still accessible and not closed.
         if loop and not loop.is_closed():
             try:
                 tasks = [t for t in asyncio.all_tasks(loop=loop) if not t.done()]
@@ -646,6 +647,8 @@ if __name__ == "__main__":
 
                 if loop.is_running():
                     loop.stop()
+                # It's generally safer to let the loop close when the program exits if it's not explicitly closed elsewhere.
+                # loop.close()
             except Exception as e_loop_final_cleanup:
                 print(f"[L_F] Ошибка при финальной очистке задач исходного цикла: {e_loop_final_cleanup}")
 
