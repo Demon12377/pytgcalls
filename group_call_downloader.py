@@ -478,11 +478,6 @@ async def download_entire_stream_segmented():
 
     print("\n--- Циклическое скачивание завершено ---")
     if pytg_app_global and hasattr(pytg_app_global, 'leave_call') and target_chat_id_int_global is not None:
-                print(f"    ВИДЕО ({len(video_segment_data)} байт) -> {fpath_video}")
-                download_succeeded_this_iteration = True
-            else:
-                print(f"    ВИДЕО (канал={video_channel_to_request_now}, q={video_quality_to_request}, ts={current_req_ts}) -> None.")
-        except RPCError as e_rpc_vid:
         try:
             print(f"Попытка покинуть звонок в {chat_title}...")
             if getattr(pytg_app_global, '_is_running', False):
@@ -635,21 +630,38 @@ if __name__ == "__main__":
             print(f"[L_F] Общая ошибка при выполнении cleanup_async_resources: {e_cleanup}")
 
         # Final attempt to clean up any remaining asyncio tasks from the original loop if it's still accessible and not closed.
+        # 'loop' is the original loop created for the main task.
         if loop and not loop.is_closed():
             try:
-                tasks = [t for t in asyncio.all_tasks(loop=loop) if not t.done()]
-                if tasks:
-                    print(f"[L_F] Отмена {len(tasks)} оставшихся задач в исходном цикле...")
-                    for task in tasks:
+                all_tasks = asyncio.all_tasks(loop=loop) # Get tasks from the correct loop
+                tasks_to_cancel = [task for task in all_tasks if not task.done()]
+                if tasks_to_cancel:
+                    print(f"[L_F] Отмена {len(tasks_to_cancel)} оставшихся задач в исходном цикле...")
+                    for task in tasks_to_cancel:
                         task.cancel()
-                    loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
-                    print("[L_F] Оставшиеся задачи в исходном цикле отменены.")
+                    # Allow canceled tasks to be processed
+                    loop.run_until_complete(asyncio.gather(*tasks_to_cancel, return_exceptions=True))
+                    print("[L_F] Оставшиеся задачи в исходном цикле отменены/завершены.")
 
-                if loop.is_running():
-                    loop.stop()
-                # It's generally safer to let the loop close when the program exits if it's not explicitly closed elsewhere.
-                # loop.close() # Caution: This might be problematic if current_loop_for_cleanup is 'loop' and cleanup is still pending via threadsafe.
+                # If the loop was stopped by keep_running = False, it might still be "running"
+                # from asyncio's perspective until all callbacks complete.
+                # This ensures it's definitely stopped before trying to close,
+                # though run_until_complete above should handle most cases.
+                if loop.is_running(): # Check if the original loop is still running
+                     loop.stop() # Stops the loop from processing new items.
+
+                # Closing the loop immediately after stopping can still sometimes cause issues
+                # if there are pending callbacks from background tasks (e.g. network operations).
+                # A very short sleep can sometimes help, but it's not a perfect solution.
+                # await asyncio.sleep(0.1) # Consider if necessary, but cleanup_async_resources should handle most waits.
+
+                # It's generally safer to let the loop close when the program exits if it's not explicitly closed elsewhere,
+                # especially if cleanup_async_resources might have used asyncio.run() which manages its own loop lifecycle.
+                # print("[L_F] Закрытие исходного цикла событий...")
+                # loop.close()
             except Exception as e_loop_final_cleanup:
-                print(f"[L_F] Ошибка при финальной очистке задач исходного цикла: {e_loop_final_cleanup}")
+                print(f"[L_F] Ошибка при финальной очистке задач/закрытии исходного цикла: {e_loop_final_cleanup}")
 
         print("[LAUNCHER] Скрипт завершен.")
+
+[end of group_call_downloader.py]
