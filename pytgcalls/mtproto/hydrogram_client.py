@@ -6,14 +6,9 @@ from typing import Union
 
 from hydrogram import Client
 from hydrogram import ContinuePropagation
-from hydrogram.errors import AuthBytesInvalid
-from hydrogram.errors import BadRequest
-from hydrogram.errors import FileMigrate
 from hydrogram.errors import FloodWait
 from hydrogram.raw.base import InputPeer
 from hydrogram.raw.base import InputUser
-from hydrogram.raw.functions.auth import ExportAuthorization
-from hydrogram.raw.functions.auth import ImportAuthorization
 from hydrogram.raw.functions.channels import GetFullChannel
 from hydrogram.raw.functions.messages import GetDhConfig
 from hydrogram.raw.functions.messages import GetFullChat
@@ -21,7 +16,6 @@ from hydrogram.raw.functions.phone import AcceptCall
 from hydrogram.raw.functions.phone import ConfirmCall
 from hydrogram.raw.functions.phone import CreateGroupCall
 from hydrogram.raw.functions.phone import DiscardCall
-from hydrogram.raw.functions.phone import DiscardGroupCall
 from hydrogram.raw.functions.phone import EditGroupCallParticipant
 from hydrogram.raw.functions.phone import GetGroupCall
 from hydrogram.raw.functions.phone import GetGroupCallStreamChannels
@@ -68,8 +62,6 @@ from hydrogram.raw.types import UpdatePhoneCall
 from hydrogram.raw.types import UpdatePhoneCallSignalingData
 from hydrogram.raw.types import Updates
 from hydrogram.raw.types.messages import DhConfig
-from hydrogram.session import Auth
-from hydrogram.session import Session
 from ntgcalls import MediaSegmentQuality
 from ntgcalls import Protocol
 
@@ -77,6 +69,7 @@ from ..types import CallProtocol
 from ..types import ChatUpdate
 from ..types import GroupCallParticipant
 from ..types import RawCallUpdate
+from ..types import UpdatedGroupCallParticipant
 from .bridged_client import BridgedClient
 from .client_cache import ClientCache
 
@@ -94,7 +87,7 @@ class HydrogramClient(BridgedClient):
             self,
         )
 
-        @self._app.on_raw_update(group=-9999)
+        @self._app.on_raw_update(group=-1)
         async def on_update(_, update, __, chats):
             if isinstance(
                 update,
@@ -186,22 +179,19 @@ class HydrogramClient(BridgedClient):
                 update,
                 UpdateGroupCallParticipants,
             ):
-                for participant in update.participants:
-                    chat_id = self._cache.get_chat_id(update.call.id)
-                    p_updates = await self.diff_participants_update(
-                        self._cache,
-                        chat_id,
-                        participant,
+                participants = update.participants
+                for participant in participants:
+                    result = self._cache.set_participants_cache_call(
+                        update.call.id,
+                        self.parse_participant(participant),
                     )
-                    for p_update in p_updates:
-                        result = self._cache.set_participants_cache(
-                            chat_id,
-                            update.call.id,
-                            p_update.action,
-                            p_update.participant,
+                    if result is not None:
+                        await self._propagate(
+                            UpdatedGroupCallParticipant(
+                                self._cache.get_chat_id(update.call.id),
+                                result,
+                            ),
                         )
-                        if result is not None:
-                            await self._propagate(p_update)
             if isinstance(
                 update,
                 UpdateGroupCall,
@@ -327,7 +317,7 @@ class HydrogramClient(BridgedClient):
         chat = await self._app.resolve_peer(chat_id)
         if isinstance(chat, InputPeerChannel):
             input_call = (
-                await self._invoke(
+                await self._app.invoke(
                     GetFullChannel(
                         channel=InputChannel(
                             channel_id=chat.channel_id,
@@ -338,14 +328,14 @@ class HydrogramClient(BridgedClient):
             ).full_chat.call
         else:
             input_call = (
-                await self._invoke(
+                await self._app.invoke(
                     GetFullChat(chat_id=chat.chat_id),
                 )
             ).full_chat.call
 
         if input_call is not None:
             raw_call = (
-                await self._invoke(
+                await self._app.invoke(
                     GetGroupCall(
                         call=input_call,
                         limit=-1,
@@ -355,10 +345,9 @@ class HydrogramClient(BridgedClient):
             call: GroupCall = raw_call.call
             participants: List[GroupCallParticipant] = raw_call.participants
             for participant in participants:
-                self._cache.set_participants_cache(
+                self._cache.set_participants_cache_chat(
                     chat_id,
                     call.id,
-                    self.parse_participant_action(participant),
                     self.parse_participant(participant),
                 )
             if call.schedule_date is not None:
@@ -367,7 +356,7 @@ class HydrogramClient(BridgedClient):
         return input_call
 
     async def get_dhc(self) -> DhConfig:
-        return await self._invoke(
+        return await self._app.invoke(
             GetDhConfig(
                 version=0,
                 random_length=256,
@@ -389,7 +378,7 @@ class HydrogramClient(BridgedClient):
         participants = []
         next_offset = ''
         while True:
-            result = await self._invoke(
+            result = await self._app.invoke(
                 GetGroupParticipants(
                     call=input_call,
                     ids=[],
@@ -416,7 +405,7 @@ class HydrogramClient(BridgedClient):
     ) -> str:
         chat_call = await self._cache.get_full_chat(chat_id)
         if chat_call is not None:
-            result: Updates = await self._invoke(
+            result: Updates = await self._app.invoke(
                 JoinGroupCall(
                     call=chat_call,
                     params=DataJSON(data=json_join),
@@ -433,10 +422,8 @@ class HydrogramClient(BridgedClient):
                 ):
                     participants = update.participants
                     for participant in participants:
-                        self._cache.set_participants_cache(
-                            chat_id,
+                        self._cache.set_participants_cache_call(
                             update.call.id,
-                            self.parse_participant_action(participant),
                             self.parse_participant(participant),
                         )
                 if isinstance(update, UpdateGroupCallConnection):
@@ -451,7 +438,7 @@ class HydrogramClient(BridgedClient):
     ):
         chat_call = await self._cache.get_full_chat(chat_id)
         if chat_call is not None:
-            result: Updates = await self._invoke(
+            result: Updates = await self._app.invoke(
                 JoinGroupCallPresentation(
                     call=chat_call,
                     params=DataJSON(data=json_join),
@@ -469,7 +456,7 @@ class HydrogramClient(BridgedClient):
     ):
         chat_call = await self._cache.get_full_chat(chat_id)
         if chat_call is not None:
-            await self._invoke(
+            await self._app.invoke(
                 LeaveGroupCallPresentation(
                     call=chat_call,
                 ),
@@ -482,7 +469,7 @@ class HydrogramClient(BridgedClient):
         protocol: Protocol,
         has_video: bool,
     ):
-        update = await self._invoke(
+        update = await self._app.invoke(
             RequestCall(
                 user_id=await self.resolve_peer(user_id),
                 random_id=self.rnd_id(),
@@ -505,7 +492,7 @@ class HydrogramClient(BridgedClient):
         g_b: bytes,
         protocol: Protocol,
     ):
-        await self._invoke(
+        await self._app.invoke(
             AcceptCall(
                 peer=self._cache.get_phone_call(user_id),
                 g_b=g_b,
@@ -521,7 +508,7 @@ class HydrogramClient(BridgedClient):
         protocol: Protocol,
     ) -> CallProtocol:
         res = (
-            await self._invoke(
+            await self._app.invoke(
                 ConfirmCall(
                     peer=self._cache.get_phone_call(user_id),
                     g_a=g_a,
@@ -541,7 +528,7 @@ class HydrogramClient(BridgedClient):
         user_id: int,
         data: bytes,
     ):
-        await self._invoke(
+        await self._app.invoke(
             SendSignalingData(
                 peer=self._cache.get_phone_call(user_id),
                 data=data,
@@ -552,7 +539,7 @@ class HydrogramClient(BridgedClient):
         self,
         chat_id: int,
     ):
-        result: Updates = await self._invoke(
+        result: Updates = await self._app.invoke(
             CreateGroupCall(
                 peer=await self.resolve_peer(chat_id),
                 random_id=self.rnd_id(),
@@ -582,25 +569,12 @@ class HydrogramClient(BridgedClient):
     ):
         chat_call = await self._cache.get_full_chat(chat_id)
         if chat_call is not None:
-            await self._invoke(
+            await self._app.invoke(
                 LeaveGroupCall(
                     call=chat_call,
                     source=0,
                 ),
             )
-
-    async def close_voice_chat(
-        self,
-        chat_id: int,
-    ):
-        chat_call = await self._cache.get_full_chat(chat_id)
-        if chat_call is not None:
-            await self._invoke(
-                DiscardGroupCall(
-                    call=chat_call,
-                ),
-            )
-            self._cache.drop_cache(chat_id)
 
     async def discard_call(
         self,
@@ -615,7 +589,7 @@ class HydrogramClient(BridgedClient):
             if is_missed
             else PhoneCallDiscardReasonHangup()
         )
-        await self._invoke(
+        await self._app.invoke(
             DiscardCall(
                 peer=peer,
                 duration=0,
@@ -634,7 +608,7 @@ class HydrogramClient(BridgedClient):
     ):
         chat_call = await self._cache.get_full_chat(chat_id)
         if chat_call is not None:
-            await self._invoke(
+            await self._app.invoke(
                 EditGroupCallParticipant(
                     call=chat_call,
                     participant=participant,
@@ -655,7 +629,7 @@ class HydrogramClient(BridgedClient):
         if chat_call is not None:
             try:
                 return (
-                    await self._invoke(
+                    await self._app.invoke(
                         GetFile(
                             location=InputGroupCallStream(
                                 call=chat_call,
@@ -682,8 +656,9 @@ class HydrogramClient(BridgedClient):
     ):
         chat_call = await self._cache.get_full_chat(chat_id)
         if chat_call is not None:
+            # noinspection PyBroadException
             channels = (
-                await self._invoke(
+                await self._app.invoke(
                     GetGroupCallStreamChannels(
                         call=chat_call,
                     ),
@@ -705,7 +680,7 @@ class HydrogramClient(BridgedClient):
     ):
         chat_call = await self._cache.get_full_chat(chat_id)
         if chat_call is not None:
-            await self._invoke(
+            await self._app.invoke(
                 EditGroupCallParticipant(
                     call=chat_call,
                     participant=participant,
@@ -743,78 +718,6 @@ class HydrogramClient(BridgedClient):
 
     def no_updates(self):
         return self._app.no_updates
-
-    async def _invoke(
-        self,
-        request,
-        dc_id: Optional[int] = None,
-        chat_id: Optional[int] = None,
-        sleep_threshold: Optional[int] = None,
-    ):
-        if chat_id is not None:
-            dc_id = self._cache.get_dc_call(chat_id)
-        if dc_id is None:
-            session = self._app
-        else:
-            session = self._app.media_sessions.get(dc_id)
-            if not session:
-                session = self._app.media_sessions[dc_id] = Session(
-                    self._app,
-                    dc_id,
-                    await Auth(
-                        self._app,
-                        dc_id,
-                        await self._app.storage.test_mode(),
-                    ).create()
-                    if dc_id != await self._app.storage.dc_id()
-                    else await self._app.storage.auth_key(),
-                    await self._app.storage.test_mode(),
-                    is_media=True,
-                )
-                await session.start()
-                if dc_id != await self._app.storage.dc_id():
-                    for _ in range(3):
-                        exported_auth = await self._invoke(
-                            ExportAuthorization(
-                                dc_id=dc_id,
-                            ),
-                        )
-
-                        try:
-                            await session.invoke(
-                                ImportAuthorization(
-                                    id=exported_auth.id,
-                                    bytes=exported_auth.bytes,
-                                ),
-                            )
-                        except AuthBytesInvalid:
-                            continue
-                        else:
-                            break
-                    else:
-                        raise AuthBytesInvalid
-        try:
-            return await session.invoke(
-                request,
-                sleep_threshold=sleep_threshold,
-            )
-        except (BadRequest, FileMigrate) as e:
-            dc_new = BridgedClient.extract_dc(
-                str(e),
-            )
-            if dc_new is not None:
-                if chat_id is not None:
-                    self._cache.set_dc_call(
-                        chat_id,
-                        dc_new,
-                    )
-                return await self._invoke(
-                    request,
-                    dc_new,
-                    chat_id,
-                    sleep_threshold,
-                )
-            raise
 
     async def start(self):
         await self._app.start()

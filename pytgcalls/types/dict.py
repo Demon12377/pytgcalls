@@ -1,5 +1,5 @@
 from ..types.py_object import PyObject
 
 
-class Dict(PyObject, dict):
+class Dict(dict, PyObject):
     pass

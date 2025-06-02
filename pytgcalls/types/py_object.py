@@ -11,10 +11,8 @@ class PyObject:
     def default(obj) -> Union[str, Dict[str, str], List[Any]]:
         if isinstance(obj, bytes):
             return repr(obj)
-        elif isinstance(obj, Enum):
-            return ' | '.join(
-                [f"{obj.__class__.__name__}.{x}" for x in obj.name.split('|')],
-            )
+        if isinstance(obj, Enum):
+            return repr(obj)
         return {
             '_': obj.__class__.__name__,
             **{

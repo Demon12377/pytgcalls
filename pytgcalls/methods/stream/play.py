@@ -44,12 +44,11 @@ class Play(Scaffold):
 
         if chat_id in await self._binding.calls():
             try:
-                await self._binding.set_stream_sources(
+                return await self._binding.set_stream_sources(
                     chat_id,
                     StreamMode.CAPTURE,
                     media_description,
                 )
-                return
             except FileError as e:
                 raise FileNotFoundError(e)
 

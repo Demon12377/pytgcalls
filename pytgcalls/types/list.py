@@ -1,5 +1,5 @@
 from ..types.py_object import PyObject
 
 
-class List(PyObject, list):
+class List(list, PyObject):
     pass

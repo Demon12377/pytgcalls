@@ -648,7 +648,7 @@ if __name__ == "__main__":
                 if loop.is_running():
                     loop.stop()
                 # It's generally safer to let the loop close when the program exits if it's not explicitly closed elsewhere.
-                # loop.close()
+                # loop.close() # Caution: This might be problematic if current_loop_for_cleanup is 'loop' and cleanup is still pending via threadsafe.
             except Exception as e_loop_final_cleanup:
                 print(f"[L_F] Ошибка при финальной очистке задач исходного цикла: {e_loop_final_cleanup}")
 
